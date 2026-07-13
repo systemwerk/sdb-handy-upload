@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Fotos an den PC schicken</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f1f5f9; color: #172033;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 18px 16px 40px; }
+  h1 { font-size: 20px; margin: 10px 0 4px; color: #0f2b5b; }
+  .sub { margin: 0 0 16px; color: #52627a; font-size: 14px; line-height: 1.45; }
+  .privacy { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px;
+    border: 1px solid #bbf7d0; border-radius: 10px; background: #f0fdf4; color: #166534;
+    font-size: 12.5px; line-height: 1.45; }
+  .pick { display: flex; width: 100%; min-height: 76px; align-items: center; justify-content: center;
+    gap: 10px; border: 2px dashed #93c5fd; border-radius: 14px; background: #ffffff;
+    color: #1d4ed8; font-size: 17px; font-weight: 700; cursor: pointer; }
+  .pick:active { background: #eff6ff; }
+  input[type=file] { display: none; }
+  ul { list-style: none; margin: 18px 0 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+    border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+  li .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li .state { flex: 0 0 auto; font-weight: 700; }
+  li.ok .state { color: #15803d; }
+  li.err .state { color: #b91c1c; }
+  li.busy .state { color: #1d4ed8; }
+  .summary { margin: 16px 0 0; padding: 11px 12px; border-radius: 10px; font-size: 14px;
+    font-weight: 650; line-height: 1.45; }
+  .summary.ok { background: #dcfce7; color: #166534; }
+  .summary.err { background: #fee2e2; color: #b91c1c; }
+  .summary.info { background: #dbeafe; color: #1e40af; }
+  .fatal { margin-top: 24px; padding: 14px; border-radius: 10px; background: #fee2e2;
+    color: #b91c1c; font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <h1>📷 Fotos an den PC schicken</h1>
+  <p class="sub">Wähle die Fotos für den Schadensfall aus. Sie erscheinen automatisch im Foto-Assistenten auf deinem PC.</p>
+  <div class="privacy">🔒 <span>Die Fotos werden auf diesem Handy <strong>verschlüsselt</strong>, bevor sie übertragen werden, und nach der Übernahme am PC sofort gelöscht. Niemand außer deinem PC kann sie lesen.</span></div>
+  <label class="pick" id="pick">＋ Fotos auswählen<input type="file" id="picker" multiple accept="image/*"></label>
+  <ul id="list"></ul>
+  <div id="summary"></div>
+  <div id="fatal" class="fatal" style="display:none"></div>
+</main>
+<script>
+(function() {
+  'use strict';
+  var SUPABASE_URL = "https://cyrkntkjsjjwpdwqsgln.supabase.co";
+  var ANON_KEY = "sb_publishable_c5lGZdTqYvmC4TcecfjF2Q_NbjfPZnu";
+  var MAX_EDGE = 2560;
+  var BUCKET = 'photo-relay';
+
+  function fatal(message) {
+    document.getElementById('fatal').style.display = 'block';
+    document.getElementById('fatal').textContent = message;
+    document.getElementById('pick').style.display = 'none';
+  }
+
+  var params = new URLSearchParams(location.hash.replace(/^#/, ''));
+  var sessionId = params.get('s') || '';
+  var keyText = params.get('k') || '';
+  if (!/^[0-9a-f-]{36}$/.test(sessionId) || !keyText) {
+    fatal('Dieser Link ist unvollständig. Bitte den QR-Code im Foto-Assistenten am PC neu scannen.');
+    return;
+  }
+
+  function b64urlToBytes(text) {
+    var b64 = text.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var raw = atob(b64);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return bytes;
+  }
+
+  var cryptoKeyPromise = null;
+  function getKey() {
+    if (!cryptoKeyPromise) {
+      cryptoKeyPromise = crypto.subtle.importKey('raw', b64urlToBytes(keyText),
+        { name: 'AES-GCM' }, false, ['encrypt']);
+    }
+    return cryptoKeyPromise;
+  }
+
+  function readCaptureTimestamp(file) {
+    var isJpeg = /^image\/jpe?g$/i.test(file.type || '') || /\.jpe?g$/i.test(file.name || '');
+    if (!isJpeg) return Promise.resolve(0);
+    return file.slice(0, 262144).arrayBuffer().then(function(buffer) {
+      try {
+        var view = new DataView(buffer);
+        if (view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return 0;
+        var offset = 2;
+        while (offset + 4 <= view.byteLength) {
+          var marker = view.getUint16(offset);
+          if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) break;
+          var size = view.getUint16(offset + 2);
+          if (size < 2) break;
+          if (marker === 0xFFE1 && offset + 10 <= view.byteLength &&
+              view.getUint32(offset + 4) === 0x45786966) {
+            return parseExif(view, offset + 10, offset + 2 + size);
+          }
+          offset += 2 + size;
+        }
+      } catch (error) {}
+      return 0;
+    }).catch(function() { return 0; });
+  }
+
+  function parseExif(view, tiffStart, segmentEnd) {
+    try {
+      var byteOrder = view.getUint16(tiffStart);
+      var little = byteOrder === 0x4949;
+      if (!little && byteOrder !== 0x4D4D) return 0;
+      var get16 = function(pos) { return view.getUint16(pos, little); };
+      var get32 = function(pos) { return view.getUint32(pos, little); };
+      if (get16(tiffStart + 2) !== 42) return 0;
+      var limit = Math.min(segmentEnd, view.byteLength);
+      var readAscii = function(entryPos) {
+        var count = get32(entryPos + 4);
+        if (count < 8 || count > 64) return '';
+        var valuePos = count <= 4 ? entryPos + 8 : tiffStart + get32(entryPos + 8);
+        if (valuePos + count > limit) return '';
+        var text = '';
+        for (var i = 0; i < count - 1; i++) {
+          var code = view.getUint8(valuePos + i);
+          if (!code) break;
+          text += String.fromCharCode(code);
+        }
+        return text;
+      };
+      var scanIfd = function(ifdPos, wantedTag) {
+        if (ifdPos < tiffStart || ifdPos + 2 > limit) return null;
+        var entryCount = get16(ifdPos);
+        if (entryCount > 200) return null;
+        for (var i = 0; i < entryCount; i++) {
+          var entryPos = ifdPos + 2 + i * 12;
+          if (entryPos + 12 > limit) return null;
+          if (get16(entryPos) === wantedTag) return entryPos;
+        }
+        return null;
+      };
+      var ifd0 = tiffStart + get32(tiffStart + 4);
+      var dateText = '';
+      var exifPointerEntry = scanIfd(ifd0, 0x8769);
+      if (exifPointerEntry) {
+        var exifIfd = tiffStart + get32(exifPointerEntry + 8);
+        var originalEntry = scanIfd(exifIfd, 0x9003);
+        if (originalEntry) dateText = readAscii(originalEntry);
+      }
+      if (!dateText) {
+        var modifiedEntry = scanIfd(ifd0, 0x0132);
+        if (modifiedEntry) dateText = readAscii(modifiedEntry);
+      }
+      var match = dateText.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+      if (!match) return 0;
+      var timestamp = new Date(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6]).getTime();
+      return isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  function resizeToJpeg(file) {
+    return new Promise(function(resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var image = new Image();
+      image.onload = function() {
+        URL.revokeObjectURL(url);
+        try {
+          var scale = Math.min(1, MAX_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
+          var width = Math.max(1, Math.round(image.naturalWidth * scale));
+          var height = Math.max(1, Math.round(image.naturalHeight * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          var context = canvas.getContext('2d');
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+          canvas.toBlob(function(blob) {
+            if (blob) resolve(blob);
+            else reject(new Error('JPEG konnte nicht erzeugt werden.'));
+          }, 'image/jpeg', 0.85);
+        } catch (error) { reject(error); }
+      };
+      image.onerror = function() {
+        URL.revokeObjectURL(url);
+        reject(new Error('Bild konnte nicht gelesen werden.'));
+      };
+      image.src = url;
+    });
+  }
+
+  function buildEnvelope(meta, jpegBuffer) {
+    var metaBytes = new TextEncoder().encode(JSON.stringify(meta));
+    var envelope = new Uint8Array(4 + metaBytes.length + jpegBuffer.byteLength);
+    new DataView(envelope.buffer).setUint32(0, metaBytes.length, true);
+    envelope.set(metaBytes, 4);
+    envelope.set(new Uint8Array(jpegBuffer), 4 + metaBytes.length);
+    return envelope;
+  }
+
+  function encrypt(envelope) {
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    return getKey().then(function(key) {
+      return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, envelope);
+    }).then(function(cipher) {
+      var payload = new Uint8Array(12 + cipher.byteLength);
+      payload.set(iv, 0);
+      payload.set(new Uint8Array(cipher), 12);
+      return payload;
+    });
+  }
+
+  function upload(payload) {
+    var objectName = 's/' + sessionId + '/' + Date.now() + '-' +
+      Math.random().toString(16).slice(2, 10) + '.bin';
+    var attempt = function(remaining) {
+      return fetch(SUPABASE_URL + '/storage/v1/object/' + BUCKET + '/' + objectName, {
+        method: 'POST',
+        headers: {
+          apikey: ANON_KEY,
+          Authorization: 'Bearer ' + ANON_KEY,
+          'Content-Type': 'application/octet-stream',
+          'x-upsert': 'false'
+        },
+        body: payload
+      }).then(function(response) {
+        if (!response.ok) throw new Error('Upload fehlgeschlagen (' + response.status + ')');
+      }).catch(function(error) {
+        if (remaining > 0) {
+          return new Promise(function(r) { setTimeout(r, 1200); })
+            .then(function() { return attempt(remaining - 1); });
+        }
+        throw error;
+      });
+    };
+    return attempt(2);
+  }
+
+  var list = document.getElementById('list');
+  var summary = document.getElementById('summary');
+  var okCount = 0;
+  var errCount = 0;
+  var queue = Promise.resolve();
+
+  function setSummary(cls, text) {
+    summary.className = 'summary ' + cls;
+    summary.textContent = text;
+  }
+
+  function processFile(file) {
+    var item = document.createElement('li');
+    item.className = 'busy';
+    item.innerHTML = '<span class="name"></span><span class="state">wird verschlüsselt …</span>';
+    item.querySelector('.name').textContent = file.name;
+    list.appendChild(item);
+    var state = item.querySelector('.state');
+
+    return readCaptureTimestamp(file).then(function(takenAt) {
+      return resizeToJpeg(file).then(function(blob) {
+        return blob.arrayBuffer();
+      }).then(function(jpegBuffer) {
+        var meta = {
+          name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
+          takenAt: takenAt || file.lastModified || Date.now(),
+          type: 'image/jpeg'
+        };
+        return encrypt(buildEnvelope(meta, jpegBuffer));
+      }).then(function(payload) {
+        state.textContent = 'wird übertragen …';
+        return upload(payload);
+      }).then(function() {
+        item.className = 'ok';
+        state.textContent = '✓ übertragen';
+        okCount++;
+      });
+    }).catch(function(error) {
+      item.className = 'err';
+      state.textContent = '✗ ' + (error && error.message ? error.message : 'Fehler');
+      errCount++;
+    });
+  }
+
+  document.getElementById('picker').addEventListener('change', function(event) {
+    var files = Array.prototype.slice.call(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    setSummary('info', 'Übertrage ' + files.length + ' Foto' + (files.length === 1 ? '' : 's') + ' …');
+    files.forEach(function(file) {
+      queue = queue.then(function() { return processFile(file); });
+    });
+    queue = queue.then(function() {
+      if (errCount) {
+        setSummary('err', okCount + ' übertragen, ' + errCount + ' fehlgeschlagen. Fehlgeschlagene Fotos bitte erneut auswählen.');
+      } else {
+        setSummary('ok', '✓ ' + okCount + ' Foto' + (okCount === 1 ? '' : 's') + ' übertragen. Schau jetzt auf deinen PC — dort läuft die Zuordnung. Du kannst hier weitere Fotos auswählen oder die Seite schließen.');
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
