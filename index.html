@@ -197,6 +197,62 @@
     });
   }
 
+  function extractExifSegment(file) {
+    var isJpeg = /^image\/jpe?g$/i.test(file.type || '') || /\.jpe?g$/i.test(file.name || '');
+    if (!isJpeg) return Promise.resolve(null);
+    return file.slice(0, 262144).arrayBuffer().then(function(buffer) {
+      try {
+        var view = new DataView(buffer);
+        if (view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return null;
+        var offset = 2;
+        while (offset + 4 <= view.byteLength) {
+          var marker = view.getUint16(offset);
+          if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) break;
+          var size = view.getUint16(offset + 2);
+          if (size < 2) break;
+          if (marker === 0xFFE1 && offset + 10 <= view.byteLength &&
+              view.getUint32(offset + 4) === 0x45786966) {
+            var end = offset + 2 + size;
+            if (end > view.byteLength) return null;
+            var segment = new Uint8Array(buffer.slice(offset, end));
+            normalizeExifOrientation(segment);
+            return segment;
+          }
+          offset += 2 + size;
+        }
+      } catch (error) {}
+      return null;
+    }).catch(function() { return null; });
+  }
+
+  function normalizeExifOrientation(segment) {
+    try {
+      var view = new DataView(segment.buffer, segment.byteOffset, segment.byteLength);
+      var tiffStart = 10;
+      var byteOrder = view.getUint16(tiffStart);
+      var little = byteOrder === 0x4949;
+      if (!little && byteOrder !== 0x4D4D) return;
+      if (view.getUint16(tiffStart + 2, little) !== 42) return;
+      var ifd0 = tiffStart + view.getUint32(tiffStart + 4, little);
+      if (ifd0 < tiffStart || ifd0 + 2 > segment.byteLength) return;
+      var count = view.getUint16(ifd0, little);
+      if (count > 300) return;
+      for (var i = 0; i < count; i++) {
+        var entry = ifd0 + 2 + i * 12;
+        if (entry + 12 > segment.byteLength) return;
+        if (view.getUint16(entry, little) === 0x0112) {
+          view.setUint16(entry + 8, 1, little);
+          return;
+        }
+      }
+    } catch (error) {}
+  }
+
+  function withExifSegment(blob, segment) {
+    if (!segment) return blob;
+    return new Blob([blob.slice(0, 2), segment, blob.slice(2)], { type: 'image/jpeg' });
+  }
+
   function buildEnvelope(meta, jpegBuffer) {
     var metaBytes = new TextEncoder().encode(JSON.stringify(meta));
     var envelope = new Uint8Array(4 + metaBytes.length + jpegBuffer.byteLength);
@@ -264,8 +320,8 @@
     var state = item.querySelector('.state');
 
     return readCaptureTimestamp(file).then(function(takenAt) {
-      return resizeToJpeg(file).then(function(blob) {
-        return blob.arrayBuffer();
+      return Promise.all([resizeToJpeg(file), extractExifSegment(file)]).then(function(results) {
+        return withExifSegment(results[0], results[1]).arrayBuffer();
       }).then(function(jpegBuffer) {
         var meta = {
           name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
