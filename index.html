@@ -20,7 +20,21 @@
     gap: 10px; border: 2px dashed #93c5fd; border-radius: 14px; background: #ffffff;
     color: #1d4ed8; font-size: 17px; font-weight: 700; cursor: pointer; }
   .pick:active { background: #eff6ff; }
+  .pick.is-selecting { border-color: #60a5fa; background: #eff6ff; }
   input[type=file] { display: none; }
+  .cloud-hint { display: flex; gap: 9px; align-items: flex-start; margin: 10px 2px 0;
+    color: #52627a; font-size: 12.5px; line-height: 1.45; }
+  .cloud-hint strong { color: #334155; }
+  .selection-status { display: flex; gap: 11px; align-items: flex-start; margin: 12px 0 0;
+    padding: 12px; border: 1px solid #93c5fd; border-radius: 10px; background: #dbeafe;
+    color: #1e40af; font-size: 13px; line-height: 1.45; }
+  .selection-status[hidden] { display: none; }
+  .selection-status strong { display: block; margin-bottom: 2px; font-size: 14px; }
+  .selection-spinner { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 1px;
+    border: 3px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%;
+    animation: selection-spin .8s linear infinite; }
+  @keyframes selection-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .selection-spinner { animation-duration: 1.8s; } }
   ul { list-style: none; margin: 18px 0 0; padding: 0; }
   li { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
     border-bottom: 1px solid #e2e8f0; font-size: 13px; }
@@ -44,8 +58,13 @@
   <p class="sub">Wähle die Fotos für den Schadensfall aus. Sie erscheinen automatisch im Foto-Assistenten auf deinem PC.</p>
   <div class="privacy">🔒 <span>Die Fotos werden auf diesem Handy <strong>verschlüsselt</strong>, bevor sie übertragen werden, und nach der Übernahme am PC sofort gelöscht. Niemand außer deinem PC kann sie lesen.</span></div>
   <label class="pick" id="pick">＋ Fotos auswählen<input type="file" id="picker" multiple accept="image/*"></label>
+  <div class="cloud-hint" id="cloud-hint"><span aria-hidden="true">☁️</span><span><strong>Hinweis zu iCloud:</strong> Liegen Fotos nur in iCloud, lädt dein iPhone sie nach dem Haken zuerst herunter. Das kann einige Sekunden dauern. Bitte warten – du musst nicht erneut tippen.</span></div>
+  <div id="selection-status" class="selection-status" role="status" aria-live="polite" hidden>
+    <span class="selection-spinner" aria-hidden="true"></span>
+    <span><strong>Dein iPhone bereitet die Auswahl vor …</strong>Falls Fotos nur in iCloud liegen, werden sie jetzt zuerst geladen. Bitte warten – die Übertragung startet danach automatisch.</span>
+  </div>
   <ul id="list"></ul>
-  <div id="summary"></div>
+  <div id="summary" role="status" aria-live="polite"></div>
   <div id="fatal" class="fatal" style="display:none"></div>
 </main>
 <script src="heic-exif.js"></script>
@@ -61,6 +80,8 @@
     document.getElementById('fatal').style.display = 'block';
     document.getElementById('fatal').textContent = message;
     document.getElementById('pick').style.display = 'none';
+    document.getElementById('cloud-hint').style.display = 'none';
+    document.getElementById('selection-status').hidden = true;
   }
 
   var params = new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -335,6 +356,9 @@
   var UPLOAD_CONCURRENCY = 2;
   var list = document.getElementById('list');
   var summary = document.getElementById('summary');
+  var picker = document.getElementById('picker');
+  var pick = document.getElementById('pick');
+  var selectionStatus = document.getElementById('selection-status');
   var okCount = 0;
   var errCount = 0;
   var outstanding = 0;
@@ -364,6 +388,18 @@
   function setSummary(cls, text) {
     summary.className = 'summary ' + cls;
     summary.textContent = text;
+  }
+
+  function showSelectionStatus() {
+    selectionStatus.hidden = false;
+    pick.classList.add('is-selecting');
+    pick.setAttribute('aria-busy', 'true');
+  }
+
+  function hideSelectionStatus() {
+    selectionStatus.hidden = true;
+    pick.classList.remove('is-selecting');
+    pick.removeAttribute('aria-busy');
   }
 
   function parseExifSegment(segment) {
@@ -411,7 +447,7 @@
     var state = item.querySelector('.state');
 
     var prepared = prepareChain.then(function() {
-      state.textContent = 'wird verschlüsselt …';
+      state.textContent = 'wird vorbereitet …';
       return preparePayload(file);
     });
     // Kette auch nach einem Fehler fortsetzen (Fehler landet unten im catch).
@@ -447,11 +483,17 @@
     }
   }
 
-  document.getElementById('picker').addEventListener('change', function(event) {
+  // iOS liefert der Webseite die Dateien erst, nachdem eventuell ausgelagerte
+  // iCloud-Originale geladen wurden. Deshalb beginnt das Feedback bereits beim
+  // Öffnen der Auswahl und endet erst, wenn change/cancel bei uns ankommt.
+  pick.addEventListener('click', showSelectionStatus);
+  picker.addEventListener('cancel', hideSelectionStatus);
+  picker.addEventListener('change', function(event) {
+    hideSelectionStatus();
     var files = Array.prototype.slice.call(event.target.files || []);
     event.target.value = '';
     if (!files.length) return;
-    setSummary('info', 'Übertrage ' + files.length + ' Foto' + (files.length === 1 ? '' : 's') + ' …');
+    setSummary('info', files.length + ' Foto' + (files.length === 1 ? '' : 's') + ' ausgewählt – werden jetzt vorbereitet und übertragen …');
     files.forEach(function(file) {
       outstanding++;
       processFile(file).then(function() {
