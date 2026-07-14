@@ -48,6 +48,7 @@
   <div id="summary"></div>
   <div id="fatal" class="fatal" style="display:none"></div>
 </main>
+<script src="heic-exif.js"></script>
 <script>
 (function() {
   'use strict';
@@ -86,6 +87,37 @@
         { name: 'AES-GCM' }, false, ['encrypt']);
     }
     return cryptoKeyPromise;
+  }
+
+  // Kann dieser Browser HEIC dekodieren (Safari ab iOS 17)? Dann darf iOS die
+  // Originale ohne die langsame Vorab-Konvertierung übergeben — der Auswahl-
+  // Haken in der Galerie reagiert sofort. 1×1-Probe-HEIC, ~530 Bytes.
+  var PROBE_HEIC_B64 = 'AAAAGGZ0eXBoZWljAAAAAGhlaWNtaWYxAAABsG1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAAADnBpdG0AAAAAAAEAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAARBpcHJwAAAA7mlwY28AAAATY29scm5jbHgAAgACAAaAAAAADGNsbGkAywBAAAAAFGlzcGUAAAAAAAAAAgAAAAIAAAAoY2xhcAAAAAEAAAABAAAAAQAAAAH/wAAAAIAAAP/AAAAAgAAAAAAACWlyb3QAAAAAEHBpeGkAAAAAAwgICAAAAHJodmNDAQNwAAAAsAAAAAAAHvAA/P34+AAACwOgAAEAF0ABDAH//wNwAAADALAAAAMAAAMAHnAkoQABACRCAQEDcAAAAwCwAAADAAADAB6gFCBBwKEEGIe5FlU3AgIGAICiAAEACUQBwGFyyEBTJAAAABppcG1hAAAAAAAAAAEAAQeBAgMGh4SFAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAAdgAAABLAAAAAW1kYXQAAAAAAAAAWwAAAEcoAa+jWxGVkOGslMSQ/r05h27qSun/vbGce8v65qYzfRL8Jv73/+Hsf/+q/C/fQneNoSgdZpix9i4+/yxXffOaRas5T5EBpQ==';
+
+  function detectHeicSupport() {
+    return new Promise(function(resolve) {
+      try {
+        var raw = atob(PROBE_HEIC_B64);
+        var bytes = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        var url = URL.createObjectURL(new Blob([bytes], { type: 'image/heic' }));
+        var image = new Image();
+        var finish = function(ok) { URL.revokeObjectURL(url); resolve(ok); };
+        image.onload = function() { finish(image.naturalWidth > 0); };
+        image.onerror = function() { finish(false); };
+        setTimeout(function() { finish(false); }, 3000);
+        image.src = url;
+      } catch (error) { resolve(false); }
+    });
+  }
+
+  if (window.sdbHeicExif) {
+    detectHeicSupport().then(function(supported) {
+      if (supported) {
+        document.getElementById('picker').setAttribute('accept',
+          'image/*,image/heic,image/heif,.heic,.heif');
+      }
+    });
   }
 
   function readCaptureTimestamp(file) {
@@ -334,17 +366,38 @@
     summary.textContent = text;
   }
 
+  function parseExifSegment(segment) {
+    try {
+      var view = new DataView(segment.buffer, segment.byteOffset, segment.byteLength);
+      return parseExif(view, 10, segment.byteLength);
+    } catch (error) { return 0; }
+  }
+
   function preparePayload(file) {
-    return readCaptureTimestamp(file).then(function(takenAt) {
-      return Promise.all([resizeToJpeg(file), extractExifSegment(file)]).then(function(results) {
-        return withExifSegment(results[0], results[1]).arrayBuffer();
-      }).then(function(jpegBuffer) {
-        var meta = {
-          name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
-          takenAt: takenAt || file.lastModified || Date.now(),
-          type: 'image/jpeg'
-        };
-        return encrypt(buildEnvelope(meta, jpegBuffer));
+    var heicApi = window.sdbHeicExif;
+    var isHeic = heicApi ? heicApi.isHeicFile(file) : false;
+    // HEIC: EXIF aus dem Container ziehen (Aufnahmezeit/GPS bleiben erhalten);
+    // JPEG: wie bisher das APP1-Segment kopieren. Drehung wird beim Verkleinern
+    // eingebrannt, deshalb in beiden Fällen Orientation auf 1 normalisieren.
+    var segmentPromise = isHeic
+      ? heicApi.extractAppSegment(file).then(function(segment) {
+          if (segment) normalizeExifOrientation(segment);
+          return segment;
+        })
+      : extractExifSegment(file);
+    return Promise.all([resizeToJpeg(file), segmentPromise]).then(function(results) {
+      var takenAtPromise = isHeic
+        ? Promise.resolve(results[1] ? parseExifSegment(results[1]) : 0)
+        : readCaptureTimestamp(file);
+      return takenAtPromise.then(function(takenAt) {
+        return withExifSegment(results[0], results[1]).arrayBuffer().then(function(jpegBuffer) {
+          var meta = {
+            name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
+            takenAt: takenAt || file.lastModified || Date.now(),
+            type: 'image/jpeg'
+          };
+          return encrypt(buildEnvelope(meta, jpegBuffer));
+        });
       });
     });
   }
