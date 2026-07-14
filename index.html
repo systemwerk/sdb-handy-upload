@@ -300,25 +300,41 @@
     return attempt(2);
   }
 
+  var UPLOAD_CONCURRENCY = 2;
   var list = document.getElementById('list');
   var summary = document.getElementById('summary');
   var okCount = 0;
   var errCount = 0;
-  var queue = Promise.resolve();
+  var outstanding = 0;
+
+  // Stufe 1 (Komprimieren+Verschlüsseln) läuft strikt nacheinander –
+  // parallele Canvas-Dekodierung großer Fotos riskiert Speicherabbrüche.
+  var prepareChain = Promise.resolve();
+
+  // Stufe 2 (Upload) darf UPLOAD_CONCURRENCY Fotos gleichzeitig übertragen.
+  var activeUploads = 0;
+  var uploadWaiters = [];
+
+  function acquireUploadSlot() {
+    if (activeUploads < UPLOAD_CONCURRENCY) {
+      activeUploads++;
+      return Promise.resolve();
+    }
+    return new Promise(function(resolve) { uploadWaiters.push(resolve); });
+  }
+
+  function releaseUploadSlot() {
+    var next = uploadWaiters.shift();
+    if (next) next();
+    else activeUploads--;
+  }
 
   function setSummary(cls, text) {
     summary.className = 'summary ' + cls;
     summary.textContent = text;
   }
 
-  function processFile(file) {
-    var item = document.createElement('li');
-    item.className = 'busy';
-    item.innerHTML = '<span class="name"></span><span class="state">wird verschlüsselt …</span>';
-    item.querySelector('.name').textContent = file.name;
-    list.appendChild(item);
-    var state = item.querySelector('.state');
-
+  function preparePayload(file) {
     return readCaptureTimestamp(file).then(function(takenAt) {
       return Promise.all([resizeToJpeg(file), extractExifSegment(file)]).then(function(results) {
         return withExifSegment(results[0], results[1]).arrayBuffer();
@@ -329,19 +345,53 @@
           type: 'image/jpeg'
         };
         return encrypt(buildEnvelope(meta, jpegBuffer));
-      }).then(function(payload) {
-        state.textContent = 'wird übertragen …';
-        return upload(payload);
-      }).then(function() {
-        item.className = 'ok';
-        state.textContent = '✓ übertragen';
-        okCount++;
       });
+    });
+  }
+
+  function processFile(file) {
+    var item = document.createElement('li');
+    item.className = 'busy';
+    item.innerHTML = '<span class="name"></span><span class="state">wartet …</span>';
+    item.querySelector('.name').textContent = file.name;
+    list.appendChild(item);
+    var state = item.querySelector('.state');
+
+    var prepared = prepareChain.then(function() {
+      state.textContent = 'wird verschlüsselt …';
+      return preparePayload(file);
+    });
+    // Kette auch nach einem Fehler fortsetzen (Fehler landet unten im catch).
+    prepareChain = prepared.then(function() {}, function() {});
+
+    return prepared.then(function(payload) {
+      state.textContent = 'wartet auf Übertragung …';
+      return acquireUploadSlot().then(function() {
+        state.textContent = 'wird übertragen …';
+        return upload(payload).then(function() {
+          releaseUploadSlot();
+        }, function(error) {
+          releaseUploadSlot();
+          throw error;
+        });
+      });
+    }).then(function() {
+      item.className = 'ok';
+      state.textContent = '✓ übertragen';
+      okCount++;
     }).catch(function(error) {
       item.className = 'err';
       state.textContent = '✗ ' + (error && error.message ? error.message : 'Fehler');
       errCount++;
     });
+  }
+
+  function showFinalSummary() {
+    if (errCount) {
+      setSummary('err', okCount + ' übertragen, ' + errCount + ' fehlgeschlagen. Fehlgeschlagene Fotos bitte erneut auswählen.');
+    } else {
+      setSummary('ok', '✓ ' + okCount + ' Foto' + (okCount === 1 ? '' : 's') + ' übertragen. Schau jetzt auf deinen PC — dort läuft die Zuordnung. Du kannst hier weitere Fotos auswählen oder die Seite schließen.');
+    }
   }
 
   document.getElementById('picker').addEventListener('change', function(event) {
@@ -350,14 +400,11 @@
     if (!files.length) return;
     setSummary('info', 'Übertrage ' + files.length + ' Foto' + (files.length === 1 ? '' : 's') + ' …');
     files.forEach(function(file) {
-      queue = queue.then(function() { return processFile(file); });
-    });
-    queue = queue.then(function() {
-      if (errCount) {
-        setSummary('err', okCount + ' übertragen, ' + errCount + ' fehlgeschlagen. Fehlgeschlagene Fotos bitte erneut auswählen.');
-      } else {
-        setSummary('ok', '✓ ' + okCount + ' Foto' + (okCount === 1 ? '' : 's') + ' übertragen. Schau jetzt auf deinen PC — dort läuft die Zuordnung. Du kannst hier weitere Fotos auswählen oder die Seite schließen.');
-      }
+      outstanding++;
+      processFile(file).then(function() {
+        outstanding--;
+        if (!outstanding) showFinalSummary();
+      });
     });
   });
 })();
