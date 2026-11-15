@@ -92,6 +92,34 @@
     return;
   }
 
+  // Seit v7.0.0 nennt der QR-Code den Ordner im Bucket (#p=…). Ältere Versionen der
+  // Erweiterung räumen unter „s/“ nach 15 Minuten auf, v7-Sitzungen gelten 60 Minuten –
+  // deshalb liegen ihre Fotos getrennt. Ältere QR-Codes ohne p laden weiter nach „s/“.
+  var objectPrefix = /^[a-z0-9]{1,8}$/.test(params.get('p') || '') ? params.get('p') : 's';
+
+  // Seit v7.0.0 steht die Ablaufzeit der Sitzung im QR-Code (#e=Unix-Sekunden). Danach holt
+  // der PC nichts mehr ab – also auch nichts mehr hochladen, statt „übertragen“ zu melden.
+  // Ältere QR-Codes ohne e funktionieren weiter wie bisher.
+  // 2 Minuten Puffer: Handy-Uhr kann nachgehen, ein Upload kann noch unterwegs sein – danach
+  // holt der PC nichts mehr ab (Review-Befund 14).
+  var expiresAt = (Number(params.get('e')) || 0) * 1000;
+  if (expiresAt) expiresAt -= 2 * 60 * 1000;
+  var EXPIRED_TEXT = 'Diese Handy-Sitzung ist abgelaufen. Bitte am PC im Foto-Assistenten einen neuen QR-Code erzeugen und neu scannen.';
+  function isExpired() { return expiresAt > 0 && Date.now() > expiresAt; }
+  if (isExpired()) {
+    fatal(EXPIRED_TEXT);
+    return;
+  }
+  if (expiresAt) {
+    var expiryHint = document.createElement('p');
+    expiryHint.id = 'expiry-hint';
+    expiryHint.style.cssText = 'margin:8px 0 0;font-size:13px;opacity:.75;text-align:center';
+    expiryHint.textContent = 'Diese Sitzung ist gültig bis ' +
+      new Date(expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr.';
+    var pickButton = document.getElementById('pick');
+    if (pickButton) pickButton.insertAdjacentElement('afterend', expiryHint);
+  }
+
   function b64urlToBytes(text) {
     var b64 = text.replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
@@ -328,7 +356,8 @@
   }
 
   function upload(payload) {
-    var objectName = 's/' + sessionId + '/' + Date.now() + '-' +
+    if (isExpired()) return Promise.reject(new Error('Sitzung abgelaufen – neuen QR-Code scannen'));
+    var objectName = objectPrefix + '/' + sessionId + '/' + Date.now() + '-' +
       Math.random().toString(16).slice(2, 10) + '.bin';
     var attempt = function(remaining) {
       return fetch(SUPABASE_URL + '/storage/v1/object/' + BUCKET + '/' + objectName, {
@@ -486,6 +515,13 @@
   // iOS liefert der Webseite die Dateien erst, nachdem eventuell ausgelagerte
   // iCloud-Originale geladen wurden. Deshalb beginnt das Feedback bereits beim
   // Öffnen der Auswahl und endet erst, wenn change/cancel bei uns ankommt.
+  // Abgelaufen, während die Seite offen ist: Auswahl sperren, sobald nichts mehr läuft.
+  if (expiresAt) {
+    setInterval(function() {
+      if (isExpired() && !outstanding) fatal(EXPIRED_TEXT);
+    }, 30000);
+  }
+
   pick.addEventListener('click', showSelectionStatus);
   picker.addEventListener('cancel', hideSelectionStatus);
   picker.addEventListener('change', function(event) {
