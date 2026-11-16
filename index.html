@@ -6,67 +6,145 @@
 <meta name="robots" content="noindex">
 <title>Fotos an den PC schicken</title>
 <style>
-  :root { color-scheme: light; }
+  /* Design-System wie Popup und Foto-Assistent: Blau #2563eb, Schiefertöne, Strich-Icons.
+     Hell und dunkel folgen dem iPhone. Text ab 16 px, Tippziele ab 44 px. */
+  :root {
+    color-scheme: light dark;
+    --bg: #f1f5f9; --surface: #ffffff; --ink: #0f172a; --muted: #475569; --faint: #94a3b8;
+    --line: #dbe3ee; --accent: #2563eb; --accent-press: #1d4ed8; --accent-wash: #dbeafe; --on-accent: #ffffff;
+    --ok: #15803d; --ok-wash: #dcfce7; --err: #b91c1c; --err-wash: #fee2e2; --tile: #cbd5e1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220; --surface: #131c2e; --ink: #f1f5f9; --muted: #a3b1c6; --faint: #64748b;
+      --line: #263349; --accent: #3b82f6; --accent-press: #60a5fa; --accent-wash: #172a4d; --on-accent: #ffffff;
+      --ok: #4ade80; --ok-wash: #11301f; --err: #f87171; --err-wash: #3a1719; --tile: #223046;
+    }
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f1f5f9; color: #172033;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
-  main { max-width: 560px; margin: 0 auto; padding: 18px 16px 40px; }
-  h1 { font-size: 20px; margin: 10px 0 4px; color: #0f2b5b; }
-  .sub { margin: 0 0 16px; color: #52627a; font-size: 14px; line-height: 1.45; }
-  .privacy { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px;
-    border: 1px solid #bbf7d0; border-radius: 10px; background: #f0fdf4; color: #166534;
-    font-size: 12.5px; line-height: 1.45; }
-  .pick { display: flex; width: 100%; min-height: 76px; align-items: center; justify-content: center;
-    gap: 10px; border: 2px dashed #93c5fd; border-radius: 14px; background: #ffffff;
-    color: #1d4ed8; font-size: 17px; font-weight: 700; cursor: pointer; }
-  .pick:active { background: #eff6ff; }
-  .pick.is-selecting { border-color: #60a5fa; background: #eff6ff; }
-  input[type=file] { display: none; }
-  .cloud-hint { display: flex; gap: 9px; align-items: flex-start; margin: 10px 2px 0;
-    color: #52627a; font-size: 12.5px; line-height: 1.45; }
-  .cloud-hint strong { color: #334155; }
-  .selection-status { display: flex; gap: 11px; align-items: flex-start; margin: 12px 0 0;
-    padding: 12px; border: 1px solid #93c5fd; border-radius: 10px; background: #dbeafe;
-    color: #1e40af; font-size: 13px; line-height: 1.45; }
-  .selection-status[hidden] { display: none; }
-  .selection-status strong { display: block; margin-bottom: 2px; font-size: 14px; }
-  .selection-spinner { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 1px;
-    border: 3px solid #bfdbfe; border-top-color: #2563eb; border-radius: 50%;
-    animation: selection-spin .8s linear infinite; }
-  @keyframes selection-spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .selection-spinner { animation-duration: 1.8s; } }
-  ul { list-style: none; margin: 18px 0 0; padding: 0; }
-  li { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
-    border-bottom: 1px solid #e2e8f0; font-size: 13px; }
-  li .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  li .state { flex: 0 0 auto; font-weight: 700; }
-  li.ok .state { color: #15803d; }
-  li.err .state { color: #b91c1c; }
-  li.busy .state { color: #1d4ed8; }
-  .summary { margin: 16px 0 0; padding: 11px 12px; border-radius: 10px; font-size: 14px;
-    font-weight: 650; line-height: 1.45; }
-  .summary.ok { background: #dcfce7; color: #166534; }
-  .summary.err { background: #fee2e2; color: #b91c1c; }
-  .summary.info { background: #dbeafe; color: #1e40af; }
-  .fatal { margin-top: 24px; padding: 14px; border-radius: 10px; background: #fee2e2;
-    color: #b91c1c; font-size: 14px; line-height: 1.5; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+  svg.ic { width: 1em; height: 1em; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round; }
+  main { display: flex; flex-direction: column; max-width: 560px; min-height: 100vh; min-height: 100dvh; margin: 0 auto;
+    padding: calc(14px + env(safe-area-inset-top)) 20px calc(100px + env(safe-area-inset-bottom)); }
+
+  .brand { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 650; color: var(--muted); }
+  .brand-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px;
+    background: var(--accent); color: var(--on-accent); font-size: 16px; }
+
+  /* Status: ein Ring, der zeigt, wie weit die Übertragung ist */
+  .status { margin-top: 26px; text-align: center; }
+  .medal { position: relative; width: 132px; height: 132px; margin: 0 auto 18px; }
+  .ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 8; }
+  .ring-track { stroke: var(--line); }
+  .ring-fill { stroke: var(--accent); stroke-linecap: round; stroke-dasharray: 326.73; stroke-dashoffset: 326.73;
+    transition: stroke-dashoffset .5s ease, stroke .3s ease; }
+  .medal-core { position: absolute; top: 14px; right: 14px; bottom: 14px; left: 14px; display: grid; place-items: center; border-radius: 50%;
+    background: var(--surface); color: var(--accent); font-size: 44px; }
+  .medal-core svg.ic { width: 52px; height: 52px; stroke-width: 2.4; }
+  .medal-core svg.pair { width: 72px; height: 36px; stroke-width: 2; }
+  .count { display: grid; justify-items: center; font-size: 38px; font-weight: 750; line-height: 1; color: var(--ink);
+    font-variant-numeric: tabular-nums; }
+  .count small { margin-top: 4px; font-size: 14px; font-weight: 600; color: var(--muted); }
+  .status[data-state="idle"] .ring-fill { opacity: 0; }
+  .status[data-state="selecting"] .ring-fill { stroke-dashoffset: 245; transform-origin: 50% 50%;
+    animation: turn 1s linear infinite; }
+  .status[data-state="done"] .ring-fill { stroke: var(--ok); stroke-dashoffset: 0; }
+  .status[data-state="done"] .medal-core { color: var(--ok); }
+  .status[data-state="partial"] .ring-fill { stroke: var(--ok); }
+  .status[data-state="fatal"] .ring-fill { stroke: var(--err); }
+  .status[data-state="partial"] .medal-core, .status[data-state="fatal"] .medal-core { color: var(--err); }
+  .status[data-state="fatal"] .ring-fill { stroke-dashoffset: 0; }
+  @keyframes turn { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .status[data-state="selecting"] .ring-fill { animation-duration: 2.4s; }
+    .ring-fill { transition: none; }
+  }
+  h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.2; font-weight: 750; letter-spacing: -0.01em; }
+  .lead { max-width: 34ch; margin: 0 auto; color: var(--muted); }
+  #expiry-hint { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 0; padding: 6px 12px;
+    border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+    font-size: 14px; font-weight: 600; }
+
+  /* Zwischenstand und Ergebnis */
+  .summary { margin: 16px auto 0; font-size: 16px; font-weight: 650; }
+  .summary:empty { display: none; }
+  .summary.ok { color: var(--ok); }
+  .summary.err { color: var(--err); }
+  .summary.info { color: var(--muted); font-weight: 600; }
+  .retry-all { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 52px;
+    margin-top: 14px; padding: 12px 16px; border: 0; border-radius: 14px; background: var(--accent); color: var(--on-accent);
+    font: inherit; font-size: 17px; font-weight: 700; cursor: pointer; }
+  .retry-all:active { background: var(--accent-press); }
+
+  /* Fotos als Kacheln: Vorschau statt Dateiname */
+  ul { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 24px 0 0; padding: 0; }
+  /* Quadrat über padding statt aspect-ratio, Ränder einzeln statt inset: läuft auch auf älteren iPhones */
+  li { position: relative; overflow: hidden; border-radius: 12px; background: var(--tile) center / cover no-repeat; }
+  li::before { content: ""; display: block; padding-top: 100%; }
+  li::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: rgba(15, 23, 42, .38); transition: opacity .25s; }
+  li.ok::after { opacity: 0; }
+  li.err::after { background: rgba(127, 29, 29, .55); }
+  li .name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  li .state { position: absolute; z-index: 1; right: 6px; bottom: 6px; display: grid; place-items: center; width: 24px;
+    height: 24px; border-radius: 50%; background: var(--surface); color: transparent; font-size: 0; overflow: hidden; }
+  li.busy .state { background: transparent; border: 3px solid rgba(255, 255, 255, .45); border-top-color: #ffffff;
+    animation: turn .9s linear infinite; }
+  li.ok .state { background: var(--ok); }
+  li.ok .state::before { content: ""; width: 11px; height: 6px; margin-top: -3px; border: solid #ffffff; border-width: 0 0 2.5px 2.5px;
+    transform: rotate(-45deg); }
+  li.err .state { display: none; }
+  @media (prefers-reduced-motion: reduce) { li.busy .state { animation-duration: 2.4s; } }
+  .retry { position: absolute; z-index: 2; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; align-content: center; gap: 4px;
+    padding: 4px; border: 0; background: transparent; color: #ffffff; font: inherit; font-size: 13px; font-weight: 700;
+    line-height: 1.15; cursor: pointer; }
+  .retry svg { font-size: 22px; }
+  .retry.is-note { cursor: default; }
+  .reason { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--muted); }
+
+  .fatal { max-width: 34ch; margin: 0 auto; color: var(--muted); }
+  .privacy { display: flex; gap: 8px; align-items: flex-start; margin: auto 0 0; padding-top: 28px; color: var(--muted); font-size: 13.5px;
+    line-height: 1.45; }
+  .privacy svg { margin-top: 2px; font-size: 16px; color: var(--ok); }
+
+  /* Knopf unten, in Reichweite des Daumens */
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+    background: var(--bg); border-top: 1px solid var(--line); }
+  .pick { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; max-width: 520px; min-height: 56px;
+    margin: 0 auto; border-radius: 16px; background: var(--accent); color: var(--on-accent); font-size: 18px; font-weight: 700;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background .12s, transform .12s; }
+  .pick svg { font-size: 22px; }
+  .pick:active { background: var(--accent-press); transform: scale(.985); }
+  .pick.is-selecting { opacity: .6; }
+  .pick.is-secondary { background: var(--surface); color: var(--accent); border: 1px solid var(--line); }
+  input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 </style>
 </head>
 <body>
 <main>
-  <h1>📷 Fotos an den PC schicken</h1>
-  <p class="sub">Wähle die Fotos für den Schadensfall aus. Sie erscheinen automatisch im Foto-Assistenten auf deinem PC.</p>
-  <div class="privacy">🔒 <span>Die Fotos werden auf diesem Handy <strong>verschlüsselt</strong>, bevor sie übertragen werden, und nach der Übernahme am PC sofort gelöscht. Niemand außer deinem PC kann sie lesen.</span></div>
-  <label class="pick" id="pick">＋ Fotos auswählen<input type="file" id="picker" multiple accept="image/*"></label>
-  <div class="cloud-hint" id="cloud-hint"><span aria-hidden="true">☁️</span><span><strong>Hinweis zu iCloud:</strong> Liegen Fotos nur in iCloud, lädt dein iPhone sie nach dem Haken zuerst herunter. Das kann einige Sekunden dauern. Bitte warten – du musst nicht erneut tippen.</span></div>
-  <div id="selection-status" class="selection-status" role="status" aria-live="polite" hidden>
-    <span class="selection-spinner" aria-hidden="true"></span>
-    <span><strong>Dein iPhone bereitet die Auswahl vor …</strong>Falls Fotos nur in iCloud liegen, werden sie jetzt zuerst geladen. Bitte warten – die Übertragung startet danach automatisch.</span>
-  </div>
-  <ul id="list"></ul>
-  <div id="summary" role="status" aria-live="polite"></div>
-  <div id="fatal" class="fatal" style="display:none"></div>
+  <div class="brand"><span class="brand-mark"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H13L13 2Z"/></svg></span>Schädiger-DB</div>
+
+  <section class="status" id="status" data-state="idle">
+    <div class="medal" aria-hidden="true">
+      <svg class="ring" viewBox="0 0 120 120"><circle class="ring-track" cx="60" cy="60" r="52"/><circle class="ring-fill" id="ring" cx="60" cy="60" r="52"/></svg>
+      <div class="medal-core" id="medal-core"></div>
+    </div>
+    <h1 id="headline">Fotos an den PC schicken</h1>
+    <p class="lead" id="lead">Wähle die Fotos für den Schadensfall aus. Sie erscheinen im Foto-Assistenten auf deinem PC.</p>
+    <div id="summary" class="summary" role="status" aria-live="polite"></div>
+    <div id="fatal" class="fatal" style="display:none"></div>
+  </section>
+
+  <ul id="list" aria-label="Ausgewählte Fotos"></ul>
+
+  <p class="privacy"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Die Fotos werden auf diesem Handy verschlüsselt und nach der Übernahme am PC sofort gelöscht. Nur dein PC kann sie lesen.</span></p>
 </main>
+<div class="dock" id="dock">
+  <label class="pick" id="pick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 16-5-5-8 8"/></svg><span id="pick-label">Fotos auswählen</span><input type="file" id="picker" multiple accept="image/*"></label>
+</div>
 <script src="heic-exif.js"></script>
 <script>
 (function() {
@@ -76,12 +154,66 @@
   var MAX_EDGE = 2560;
   var BUCKET = 'photo-relay';
 
+  // ---------- Anzeige: ein Status mit Ring, Überschrift und Erklärung ----------
+  var statusEl = document.getElementById('status');
+  var headline = document.getElementById('headline');
+  var lead = document.getElementById('lead');
+  var medalCore = document.getElementById('medal-core');
+  var ring = document.getElementById('ring');
+  var RING_LENGTH = 2 * Math.PI * 52;
+  var IDLE_TITLE = headline.textContent;
+  var IDLE_TEXT = lead.textContent;
+  var svg = function(inner, box, cls) {
+    return '<svg class="ic' + (cls ? ' ' + cls : '') + '" viewBox="' + (box || '0 0 24 24') + '" aria-hidden="true">' + inner + '</svg>';
+  };
+  var ICON = {
+    // Handy → PC
+    pair: svg('<rect x="3" y="4" width="13" height="28" rx="3"/><path d="M8 27h3"/><path d="M22 18h14"/><path d="m31 12 6 6-6 6"/>' +
+      '<rect x="43" y="7" width="26" height="18" rx="2.5"/><path d="M50 32h12"/><path d="M56 25v7"/>', '0 0 72 36', 'pair'),
+    check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+    warn: svg('<path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9.5V14"/><path d="M12 17.2v.05"/>'),
+    clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    retry: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>')
+  };
+
+  function setState(state, title, text) {
+    statusEl.setAttribute('data-state', state);
+    headline.textContent = title;
+    lead.textContent = text;
+    lead.style.display = text ? '' : 'none';
+  }
+  // Bei Anteil 0 ausblenden: Die runde Linienkappe ließe sonst einen Punkt stehen.
+  function setRing(fraction) {
+    var part = Math.max(0, Math.min(1, fraction));
+    ring.style.strokeDashoffset = String(RING_LENGTH * (1 - part));
+    ring.style.opacity = part > 0 ? '' : '0';
+  }
+  // Zustände, deren Ring allein aus dem Stylesheet kommt (umlaufender Bogen, voller Ring)
+  function ringFromStylesheet() {
+    ring.style.strokeDashoffset = '';
+    ring.style.opacity = '';
+  }
+  function showIdle() {
+    setState('idle', IDLE_TITLE, IDLE_TEXT);
+    medalCore.innerHTML = ICON.pair;
+    setRing(0);
+  }
+  showIdle();
+
   function fatal(message) {
+    setState('fatal', /abgelaufen/.test(message) ? 'Sitzung abgelaufen' : 'Link unvollständig', '');
+    medalCore.innerHTML = ICON.warn;
+    ringFromStylesheet();
+    document.getElementById('summary').textContent = '';
     document.getElementById('fatal').style.display = 'block';
     document.getElementById('fatal').textContent = message;
+    document.getElementById('dock').style.display = 'none';
     document.getElementById('pick').style.display = 'none';
-    document.getElementById('cloud-hint').style.display = 'none';
-    document.getElementById('selection-status').hidden = true;
+    // Nichts mehr anbieten, das ohnehin nicht mehr ankäme
+    var retries = document.querySelectorAll('.retry');
+    for (var i = 0; i < retries.length; i++) retries[i].parentNode.removeChild(retries[i]);
+    var hint = document.getElementById('expiry-hint');
+    if (hint) hint.style.display = 'none';
   }
 
   var params = new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -113,11 +245,10 @@
   if (expiresAt) {
     var expiryHint = document.createElement('p');
     expiryHint.id = 'expiry-hint';
-    expiryHint.style.cssText = 'margin:8px 0 0;font-size:13px;opacity:.75;text-align:center';
-    expiryHint.textContent = 'Diese Sitzung ist gültig bis ' +
-      new Date(expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr.';
-    var pickButton = document.getElementById('pick');
-    if (pickButton) pickButton.insertAdjacentElement('afterend', expiryHint);
+    expiryHint.innerHTML = ICON.clock + '<span></span>';
+    expiryHint.querySelector('span').textContent = 'Sitzung gültig bis ' +
+      new Date(expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' Uhr';
+    lead.insertAdjacentElement('afterend', expiryHint);
   }
 
   function b64urlToBytes(text) {
@@ -264,6 +395,13 @@
           context.fillStyle = '#ffffff';
           context.fillRect(0, 0, width, height);
           context.drawImage(image, 0, 0, width, height);
+          try {
+            var side = Math.min(width, height);
+            var thumb = document.createElement('canvas');
+            thumb.width = thumb.height = 176;
+            thumb.getContext('2d').drawImage(canvas, (width - side) / 2, (height - side) / 2, side, side, 0, 0, 176, 176);
+            file.__sdbThumb = thumb.toDataURL('image/jpeg', 0.6);
+          } catch (thumbError) {}
           canvas.toBlob(function(blob) {
             if (blob) resolve(blob);
             else reject(new Error('JPEG konnte nicht erzeugt werden.'));
@@ -359,8 +497,18 @@
     if (isExpired()) return Promise.reject(new Error('Sitzung abgelaufen – neuen QR-Code scannen'));
     var objectName = objectPrefix + '/' + sessionId + '/' + Date.now() + '-' +
       Math.random().toString(16).slice(2, 10) + '.bin';
+    // Ohne Netz gar nicht erst versuchen: bis zu 60 Sekunden auf die Verbindung warten.
+    var whenOnline = function() {
+      if (navigator.onLine !== false) return Promise.resolve();
+      return new Promise(function(resolve) {
+        var timer = setTimeout(done, 60000);
+        function done() { clearTimeout(timer); window.removeEventListener('online', done); resolve(); }
+        window.addEventListener('online', done);
+      });
+    };
     var attempt = function(remaining) {
-      return fetch(SUPABASE_URL + '/storage/v1/object/' + BUCKET + '/' + objectName, {
+      return whenOnline().then(function() {
+        return fetch(SUPABASE_URL + '/storage/v1/object/' + BUCKET + '/' + objectName, {
         method: 'POST',
         headers: {
           apikey: ANON_KEY,
@@ -368,12 +516,26 @@
           'Content-Type': 'application/octet-stream',
           'x-upsert': 'false'
         },
-        body: payload
+          body: payload
+        });
       }).then(function(response) {
-        if (!response.ok) throw new Error('Upload fehlgeschlagen (' + response.status + ')');
+        if (response.ok) return;
+        var failure = new Error('Übertragung fehlgeschlagen (' + response.status + ')');
+        // „Gibt es schon“ bei einer Wiederholung: Der erste Versuch ist doch angekommen, nur die
+        // Antwort ging verloren. Supabase meldet das je nach Version als Status 409 oder als
+        // Status 400 mit statusCode „409“ / error „Duplicate“ im Antworttext.
+        if (remaining < 2 && (response.status === 409 || response.status === 400)) {
+          return response.text().then(function(text) {
+            var body = {};
+            try { body = JSON.parse(text) || {}; } catch (parseError) {}
+            if (response.status === 409 || String(body.statusCode) === '409' || body.error === 'Duplicate') return;
+            throw failure;
+          });
+        }
+        throw failure;
       }).catch(function(error) {
         if (remaining > 0) {
-          return new Promise(function(r) { setTimeout(r, 1200); })
+          return new Promise(function(r) { setTimeout(r, remaining === 2 ? 1200 : 3000); })
             .then(function() { return attempt(remaining - 1); });
         }
         throw error;
@@ -387,7 +549,7 @@
   var summary = document.getElementById('summary');
   var picker = document.getElementById('picker');
   var pick = document.getElementById('pick');
-  var selectionStatus = document.getElementById('selection-status');
+  var pickLabel = document.getElementById('pick-label');
   var okCount = 0;
   var errCount = 0;
   var outstanding = 0;
@@ -419,16 +581,35 @@
     summary.textContent = text;
   }
 
+  // Stand während der Übertragung: Ring und Zähler
+  function refreshStatus() {
+    var total = okCount + errCount + outstanding;
+    if (!outstanding || !total) return;
+    setState('sending', 'Fotos werden übertragen', 'Bitte lass diese Seite offen, bis alles übertragen ist.');
+    medalCore.innerHTML = '<span class="count">' + okCount + '<small>von ' + total + '</small></span>';
+    setRing(okCount / total);
+    setSummary('info', '');
+  }
+
+  // iOS liefert die Dateien erst, wenn ausgelagerte iCloud-Originale geladen sind. Deshalb
+  // beginnt die Rückmeldung schon beim Öffnen der Auswahl.
   function showSelectionStatus() {
-    selectionStatus.hidden = false;
     pick.classList.add('is-selecting');
     pick.setAttribute('aria-busy', 'true');
+    if (outstanding) return;
+    setSummary('info', '');
+    setState('selecting', 'Dein iPhone bereitet die Auswahl vor …',
+      'Liegen Fotos nur in iCloud, werden sie jetzt zuerst geladen. Bitte warten, du musst nicht erneut tippen.');
+    medalCore.innerHTML = '';
+    ringFromStylesheet();
   }
 
   function hideSelectionStatus() {
-    selectionStatus.hidden = true;
     pick.classList.remove('is-selecting');
     pick.removeAttribute('aria-busy');
+    if (statusEl.getAttribute('data-state') !== 'selecting') return;
+    if (okCount || errCount) showFinalSummary();
+    else showIdle();
   }
 
   function parseExifSegment(segment) {
@@ -467,17 +648,72 @@
     });
   }
 
-  function processFile(file) {
-    var item = document.createElement('li');
+  // Bildschirm wach halten, solange Fotos unterwegs sind: Sperrt sich das iPhone, bleibt die
+  // Übertragung stehen. Der Browser gibt die Sperre frei, sobald die Seite in den Hintergrund
+  // geht – deshalb beim Zurückkommen neu anfordern. Fehlt die Funktion, passiert nichts.
+  var wakeLock = null;
+  var wakeLockPending = false;        // mehrere Fotos starten fast gleichzeitig – nur eine Anfrage
+  function holdScreenAwake() {
+    if (!outstanding || wakeLock || wakeLockPending || !navigator.wakeLock || document.visibilityState !== 'visible') return;
+    wakeLockPending = true;
+    navigator.wakeLock.request('screen').then(function(lock) {
+      wakeLockPending = false;
+      wakeLock = lock;
+      lock.addEventListener('release', function() { if (wakeLock === lock) wakeLock = null; });
+      if (!outstanding) releaseScreen();
+    }).catch(function() { wakeLockPending = false; });
+  }
+  function releaseScreen() {
+    if (!wakeLock) return;
+    var lock = wakeLock;
+    wakeLock = null;
+    lock.release().catch(function() {});
+  }
+  document.addEventListener('visibilitychange', holdScreenAwake);
+
+  // Startet ein Foto (neu oder als Wiederholung) und zählt es als „unterwegs“.
+  function startFile(file, item) {
+    outstanding++;
+    holdScreenAwake();
+    var run = processFile(file, item);
+    refreshStatus();
+    run.then(function() {
+      outstanding--;
+      if (!outstanding) {
+        releaseScreen();
+        showFinalSummary();
+      } else {
+        refreshStatus();
+      }
+    });
+  }
+
+  function retryItem(item) {
+    if (!item.__file || item.className !== 'err' || item.__unreadable) return;
+    if (isExpired()) { fatal(EXPIRED_TEXT); return; }
+    errCount--;
+    startFile(item.__file, item);
+  }
+
+  function processFile(file, existingItem) {
+    var item = existingItem || document.createElement('li');
     item.className = 'busy';
     item.innerHTML = '<span class="name"></span><span class="state">wartet …</span>';
     item.querySelector('.name').textContent = file.name;
-    list.appendChild(item);
+    item.__file = file;
+    if (!existingItem) list.appendChild(item);
     var state = item.querySelector('.state');
+    var showThumb = function() {
+      if (file.__sdbThumb) item.style.backgroundImage = 'url(' + file.__sdbThumb + ')';
+    };
+    showThumb();
 
     var prepared = prepareChain.then(function() {
       state.textContent = 'wird vorbereitet …';
-      return preparePayload(file);
+      return preparePayload(file).then(function(payload) {
+        showThumb();
+        return payload;
+      });
     });
     // Kette auch nach einem Fehler fortsetzen (Fehler landet unten im catch).
     prepareChain = prepared.then(function() {}, function() {});
@@ -496,25 +732,87 @@
     }).then(function() {
       item.className = 'ok';
       state.textContent = '✓ übertragen';
+      item.__file = null;                 // Datei freigeben
       okCount++;
     }).catch(function(error) {
+      var reason = error && error.message ? error.message : 'Fehler';
       item.className = 'err';
-      state.textContent = '✗ ' + (error && error.message ? error.message : 'Fehler');
+      state.textContent = '✗ ' + reason;
+      item.__reason = reason;
+      // Ein Foto, das sich hier nicht lesen lässt, scheitert bei jeder Wiederholung gleich.
+      item.__unreadable = /konnte nicht gelesen|konnte nicht erzeugt/.test(reason);
       errCount++;
+      if (item.__unreadable) {
+        var note = document.createElement('span');
+        note.className = 'retry is-note';
+        note.textContent = 'Nicht lesbar';
+        item.appendChild(note);
+        item.__file = null;
+      } else if (!isExpired()) {
+        // Das Foto liegt noch im Speicher der Seite – ein Tipp genügt, statt es neu auszuwählen.
+        var retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'retry';
+        retry.innerHTML = ICON.retry + '<span>Erneut senden</span>';
+        retry.addEventListener('click', function() { retryItem(item); });
+        item.appendChild(retry);
+      }
     });
   }
 
+  function failedItems() {
+    return Array.prototype.slice.call(list.querySelectorAll('li.err'));
+  }
+
+  function retryAllFailed() {
+    failedItems().forEach(retryItem);
+  }
+
   function showFinalSummary() {
+    pickLabel.textContent = 'Weitere Fotos auswählen';
+    // Abgelaufen, während Fotos unterwegs waren: gleich klar sagen statt noch Wiederholen anbieten
+    if (errCount && isExpired()) {
+      fatal((okCount ? okCount + ' Foto' + (okCount === 1 ? ' wurde' : 's wurden') + ' noch übertragen. ' : '') + EXPIRED_TEXT);
+      return;
+    }
     if (errCount) {
-      setSummary('err', okCount + ' übertragen, ' + errCount + ' fehlgeschlagen. Fehlgeschlagene Fotos bitte erneut auswählen.');
+      var failed = failedItems();
+      var retryable = failed.filter(function(item) { return !item.__unreadable; });
+      setState('partial', 'Nicht alles übertragen', retryable.length
+        ? 'Die fehlgeschlagenen Fotos sind noch hier. Tippe sie an, um sie erneut zu senden.'
+        : 'Diese Fotos lassen sich auf diesem Handy nicht lesen. Sie wurden nicht übertragen.');
+      medalCore.innerHTML = ICON.warn;
+      setRing(okCount / (okCount + errCount));
+      pick.classList.toggle('is-secondary', retryable.length > 0);
+      setSummary('err', okCount + ' übertragen, ' + errCount + ' fehlgeschlagen.');
+      // Den Grund nennen – auf den Kacheln ist dafür kein Platz
+      var reasons = [];
+      failed.forEach(function(item) { if (item.__reason && reasons.indexOf(item.__reason) < 0) reasons.push(item.__reason); });
+      if (reasons.length) {
+        var reasonLine = document.createElement('span');
+        reasonLine.className = 'reason';
+        reasonLine.textContent = 'Grund: ' + reasons.slice(0, 2).join(' · ');
+        summary.appendChild(reasonLine);
+      }
+      if (retryable.length) {
+        var retryAll = document.createElement('button');
+        retryAll.type = 'button';
+        retryAll.className = 'retry-all';
+        retryAll.innerHTML = ICON.retry + '<span></span>';
+        retryAll.querySelector('span').textContent = retryable.length === 1 ? 'Foto erneut senden' : retryable.length + ' Fotos erneut senden';
+        retryAll.addEventListener('click', retryAllFailed);
+        summary.appendChild(retryAll);
+      }
     } else {
-      setSummary('ok', '✓ ' + okCount + ' Foto' + (okCount === 1 ? '' : 's') + ' übertragen. Schau jetzt auf deinen PC — dort läuft die Zuordnung. Du kannst hier weitere Fotos auswählen oder die Seite schließen.');
+      setState('done', okCount + ' Foto' + (okCount === 1 ? '' : 's') + ' übertragen',
+        'Schau jetzt auf deinen PC. Dort läuft die Zuordnung. Du kannst weitere Fotos auswählen oder die Seite schließen.');
+      medalCore.innerHTML = ICON.check;
+      setRing(1);
+      pick.classList.remove('is-secondary');
+      setSummary('ok', '');
     }
   }
 
-  // iOS liefert der Webseite die Dateien erst, nachdem eventuell ausgelagerte
-  // iCloud-Originale geladen wurden. Deshalb beginnt das Feedback bereits beim
-  // Öffnen der Auswahl und endet erst, wenn change/cancel bei uns ankommt.
   // Abgelaufen, während die Seite offen ist: Auswahl sperren, sobald nichts mehr läuft.
   if (expiresAt) {
     setInterval(function() {
@@ -522,6 +820,11 @@
     }, 30000);
   }
 
+  // iOS vor 16.4 meldet kein „cancel“, wenn die Auswahl abgebrochen wird. Die Auswahl liegt aber
+  // über der Seite – jede Berührung der Seite beweist also, dass sie wieder zu ist.
+  document.addEventListener('pointerdown', function() {
+    if (statusEl.getAttribute('data-state') === 'selecting') hideSelectionStatus();
+  });
   pick.addEventListener('click', showSelectionStatus);
   picker.addEventListener('cancel', hideSelectionStatus);
   picker.addEventListener('change', function(event) {
@@ -529,14 +832,7 @@
     var files = Array.prototype.slice.call(event.target.files || []);
     event.target.value = '';
     if (!files.length) return;
-    setSummary('info', files.length + ' Foto' + (files.length === 1 ? '' : 's') + ' ausgewählt – werden jetzt vorbereitet und übertragen …');
-    files.forEach(function(file) {
-      outstanding++;
-      processFile(file).then(function() {
-        outstanding--;
-        if (!outstanding) showFinalSummary();
-      });
-    });
+    files.forEach(function(file) { startFile(file); });
   });
 })();
 </script>
