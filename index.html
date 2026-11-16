@@ -93,9 +93,9 @@
     height: 24px; border-radius: 50%; background: var(--surface); color: transparent; font-size: 0; overflow: hidden; }
   li.busy .state { background: transparent; border: 3px solid rgba(255, 255, 255, .45); border-top-color: #ffffff;
     animation: turn .9s linear infinite; }
-  li.ok .state { background: var(--ok); }
-  li.ok .state::before { content: ""; width: 11px; height: 6px; margin-top: -3px; border: solid #ffffff; border-width: 0 0 2.5px 2.5px;
-    transform: rotate(-45deg); }
+  /* Haken als Bild: Der Pfad ist im 24er-Raster genau mittig (x 6–18, y 7,5–16,5). Der frühere
+     Haken aus zwei gedrehten Rahmenlinien saß sichtbar zu hoch. */
+  li.ok .state { background: var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4 8-9'/%3E%3C/svg%3E") center / 16px 16px no-repeat; }
   li.err .state { display: none; }
   @media (prefers-reduced-motion: reduce) { li.busy .state { animation-duration: 2.4s; } }
   .retry { position: absolute; z-index: 2; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; align-content: center; gap: 4px;
