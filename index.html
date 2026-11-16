@@ -111,7 +111,9 @@
   .privacy svg { margin-top: 2px; font-size: 16px; color: var(--ok); }
 
   /* Knopf unten, in Reichweite des Daumens */
-  .dock { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  /* z-index: Die Haken und „Erneut senden“ auf den Kacheln haben selbst einen z-index und lagen
+     sonst beim Scrollen über dem Knopfbereich. */
+  .dock { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
     background: var(--bg); border-top: 1px solid var(--line); }
   .pick { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; max-width: 520px; min-height: 56px;
     margin: 0 auto; border-radius: 16px; background: var(--accent); color: var(--on-accent); font-size: 18px; font-weight: 700;
@@ -219,6 +221,24 @@
   var params = new URLSearchParams(location.hash.replace(/^#/, ''));
   var sessionId = params.get('s') || '';
   var keyText = params.get('k') || '';
+  // Ein neuer QR-Code ändert bei schon offenem Tab nur den Teil hinter dem #. Die Seite lädt dann
+  // nicht von selbst neu und würde weiter an die ALTE Sitzung senden: Am Handy stand „übertragen“,
+  // im nächsten Vorgang am PC kam nichts an (Tim, 16.11.2026). Deshalb neu laden, sobald Sitzung
+  // oder Schlüssel in der Adresse nicht mehr die geladenen sind. Läuft gerade eine Übertragung,
+  // erst danach (siehe showFinalSummary).
+  var reloadPending = false;
+  function linkChanged() {
+    var now = new URLSearchParams(location.hash.replace(/^#/, ''));
+    return (now.get('s') || '') !== sessionId || (now.get('k') || '') !== keyText;
+  }
+  function reloadForNewLink() {
+    if (!linkChanged()) return;
+    if (statusEl.getAttribute('data-state') === 'sending') { reloadPending = true; return; }
+    location.reload();
+  }
+  window.addEventListener('hashchange', reloadForNewLink);
+  window.addEventListener('pageshow', reloadForNewLink);
+
   if (!/^[0-9a-f-]{36}$/.test(sessionId) || !keyText) {
     fatal('Dieser Link ist unvollständig. Bitte den QR-Code im Foto-Assistenten am PC neu scannen.');
     return;
@@ -769,6 +789,9 @@
   }
 
   function showFinalSummary() {
+    // Während der Übertragung wurde ein neuer QR-Code gescannt: jetzt auf die neue Sitzung wechseln
+    if (reloadPending && linkChanged()) { location.reload(); return; }
+    reloadPending = false;
     pickLabel.textContent = 'Weitere Fotos auswählen';
     // Abgelaufen, während Fotos unterwegs waren: gleich klar sagen statt noch Wiederholen anbieten
     if (errCount && isExpired()) {
