@@ -79,6 +79,9 @@
     margin-top: 14px; padding: 12px 16px; border: 0; border-radius: 14px; background: var(--accent); color: var(--on-accent);
     font: inherit; font-size: 17px; font-weight: 700; cursor: pointer; }
   .retry-all:active { background: var(--accent-press); }
+  .switch-note { margin-top: 12px; }
+  .switch-link { display: block; width: 100%; min-height: 48px; margin-top: 10px; padding: 10px 16px; border: 1px solid var(--line);
+    border-radius: 14px; background: var(--surface); color: var(--accent); font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
 
   /* Fotos als Kacheln: Vorschau statt Dateiname */
   ul { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 24px 0 0; padding: 0; }
@@ -226,15 +229,35 @@
   // im nächsten Vorgang am PC kam nichts an (Tim, 16.11.2026). Deshalb neu laden, sobald Sitzung
   // oder Schlüssel in der Adresse nicht mehr die geladenen sind. Läuft gerade eine Übertragung,
   // erst danach (siehe showFinalSummary).
-  var reloadPending = false;
   function linkChanged() {
     var now = new URLSearchParams(location.hash.replace(/^#/, ''));
     return (now.get('s') || '') !== sessionId || (now.get('k') || '') !== keyText;
   }
   function reloadForNewLink() {
     if (!linkChanged()) return;
-    if (statusEl.getAttribute('data-state') === 'sending') { reloadPending = true; return; }
+    var state = statusEl.getAttribute('data-state');
+    if (state === 'sending') return;            // showFinalSummary entscheidet am Ende
+    // Sind noch fehlgeschlagene Fotos des vorherigen Vorgangs hier, nicht einfach neu laden:
+    // Sie wären weg, ohne dass man es merkt. Stattdessen den Wechsel anbieten.
+    if (state !== 'fatal' && document.querySelector('#list li.err')) { offerSwitch(); return; }
     location.reload();
+  }
+  function offerSwitch() {
+    var summaryBox = document.getElementById('summary');
+    if (!summaryBox || summaryBox.querySelector('.switch-link')) return;
+    var note = document.createElement('span');
+    note.className = 'reason switch-note';
+    note.textContent = 'Du hast einen neuen QR-Code gescannt. Die fehlgeschlagenen Fotos gehören noch zum vorherigen Vorgang.';
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'switch-link';
+    button.textContent = 'Zum neuen QR-Code wechseln';
+    button.addEventListener('click', function() { location.reload(); });
+    summaryBox.appendChild(note);
+    summaryBox.appendChild(button);
+    // Neue Fotos würden sonst noch beim vorherigen Vorgang landen
+    var pickButton = document.getElementById('pick');
+    if (pickButton) pickButton.style.display = 'none';
   }
   window.addEventListener('hashchange', reloadForNewLink);
   window.addEventListener('pageshow', reloadForNewLink);
@@ -789,9 +812,11 @@
   }
 
   function showFinalSummary() {
-    // Während der Übertragung wurde ein neuer QR-Code gescannt: jetzt auf die neue Sitzung wechseln
-    if (reloadPending && linkChanged()) { location.reload(); return; }
-    reloadPending = false;
+    // Ein neuer QR-Code wurde gescannt und alles ist übertragen: auf die neue Sitzung wechseln.
+    // Gab es Fehler, bleibt die Zusammenfassung stehen (mit „Erneut senden“) und bietet den
+    // Wechsel an – sonst verschwänden die Fotos, ohne dass man es merkt.
+    var switchWanted = linkChanged();
+    if (switchWanted && !errCount) { location.reload(); return; }
     pickLabel.textContent = 'Weitere Fotos auswählen';
     // Abgelaufen, während Fotos unterwegs waren: gleich klar sagen statt noch Wiederholen anbieten
     if (errCount && isExpired()) {
@@ -834,6 +859,7 @@
       pick.classList.remove('is-secondary');
       setSummary('ok', '');
     }
+    if (switchWanted) offerSwitch();
   }
 
   // Abgelaufen, während die Seite offen ist: Auswahl sperren, sobald nichts mehr läuft.
